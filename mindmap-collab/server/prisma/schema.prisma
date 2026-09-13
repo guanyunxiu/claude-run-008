@@ -1,0 +1,62 @@
+// Prisma 数据模型：用户、工作区、成员、文档元数据 + Yjs 快照
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime          @default(now())
+  memberships  WorkspaceMember[]
+  documents    Document[]
+}
+
+model Workspace {
+  id        String            @id @default(cuid())
+  name      String
+  createdAt DateTime          @default(now())
+  members   WorkspaceMember[]
+  documents Document[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  role        String    @default("editor") // owner | editor | viewer
+  userId      String
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model Document {
+  id          String     @id @default(cuid())
+  title       String     @default("未命名文档")
+  workspaceId String
+  createdById String
+  yjsState    Bytes? // Yjs 文档二进制状态（Y.encodeStateAsUpdate）
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  snapshots   Snapshot[]
+}
+
+model Snapshot {
+  id         String   @id @default(cuid())
+  documentId String
+  state      Bytes // 该版本的 Yjs 二进制状态
+  label      String? // 快照说明，如 "auto(100 ops)" / "auto(5min)" / "restore"
+  createdAt  DateTime @default(now())
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+}
