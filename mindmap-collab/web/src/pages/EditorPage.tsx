@@ -30,7 +30,7 @@ export function EditorPage() {
     api.get(`/documents/${documentId}`).then(({ data }) => setTitle(data.title));
   }, [documentId]);
 
-  const { ydoc, synced, peers } = useCollaboration(documentId, user);
+  const { ydoc, connected, synced, peers } = useCollaboration(documentId, user);
   const snap = useNodesSnapshot(ydoc);
 
   const rename = async (next: string) => {
@@ -54,8 +54,12 @@ export function EditorPage() {
           onChange={(e) => rename(e.target.value)}
           placeholder="文档标题"
         />
-        <span className={`sync-status ${synced ? 'synced' : ''}`}>
-          {synced ? '已同步' : '同步中…'}
+        <span
+          className={`sync-status ${synced ? 'synced' : ''} ${
+            connected ? '' : 'disconnected'
+          }`}
+        >
+          {!connected ? '连接断开，重连中…' : synced ? '已同步' : '同步中…'}
         </span>
         <PresenceBar peers={peers} />
         <ExportMenu documentId={documentId} />

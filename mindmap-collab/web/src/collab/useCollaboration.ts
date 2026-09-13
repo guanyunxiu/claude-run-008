@@ -24,7 +24,8 @@ export function useCollaboration(
   documentId: string | undefined,
   user: { id: string; name: string } | null,
 ) {
-  const [synced, setSynced] = useState(false);
+  const [hasSynced, setHasSynced] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [peers, setPeers] = useState<PresenceUser[]>([]);
 
   const ydoc = useMemo(() => new Y.Doc(), [documentId]);
@@ -72,19 +73,24 @@ export function useCollaboration(
     };
   }, [provider, user]);
 
-  // 首次同步完成后确保根节点存在
+  // 首次同步完成后确保根节点存在；同时跟踪连接状态（断线时及时反馈）
   useEffect(() => {
     if (!provider) return;
     const onSynced = () => {
       ensureRoot(ydoc);
-      setSynced(true);
+      setHasSynced(true);
+    };
+    const onStatus = ({ status }: { status: string }) => {
+      setConnected(status === 'connected');
     };
     provider.on('synced', onSynced);
+    provider.on('status', onStatus);
     if (idb) {
       idb.on('synced', () => ensureRoot(ydoc));
     }
     return () => {
       provider.off('synced', onSynced);
+      provider.off('status', onStatus);
     };
   }, [provider, idb, ydoc]);
 
@@ -97,7 +103,8 @@ export function useCollaboration(
     };
   }, [provider, idb, ydoc]);
 
-  return { ydoc, provider, synced, peers };
+  // 已同步 = 至少完成过一次同步 且 当前处于连接状态（断线立即变为未同步）
+  return { ydoc, provider, connected, synced: connected && hasSynced, peers };
 }
 
 function hashCode(s: string) {

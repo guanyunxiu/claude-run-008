@@ -65,7 +65,10 @@ npm run dev
 ```
 
 打开 http://localhost:5173 ，注册账号 → 创建工作区 → 新建文档。
-开两个浏览器窗口打开同一文档即可看到实时协同效果。
+
+**多账号协同**：再注册第二个账号（可用浏览器隐身窗口），在工作区详情的「成员管理」中
+按邮箱把第二个账号邀请进工作区；第二个账号登录后即可在自己的工作区列表看到该工作区，
+两个账号打开同一文档即可实时协同（在线头像、双向同步）。
 
 ## 数据模型（Yjs 共享结构）
 
@@ -89,6 +92,8 @@ ydoc.getMap('nodes') : Y.Map<nodeId, Y.Map<{
 | --- | --- | --- |
 | POST | /auth/register、/auth/login | 注册 / 登录 |
 | GET/POST | /workspaces | 工作区列表 / 创建 |
+| GET/POST | /workspaces/:id/members | 成员列表 / 按邮箱邀请 |
+| DELETE | /workspaces/:id/members/:userId | 移除成员（仅所有者） |
 | GET/POST | /workspaces/:id/documents | 文档列表 / 新建 |
 | GET/PATCH/DELETE | /documents/:id | 文档详情 / 重命名 / 删除 |
 | GET | /documents/:id/presence | 在线用户（Redis） |

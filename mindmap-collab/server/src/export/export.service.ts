@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import * as Y from 'yjs';
-import { remark } from 'remark';
 import { create } from 'xmlbuilder2';
 import type { Root, List, ListItem, RootContent } from 'mdast';
 import { DocumentsService } from '../documents/documents.service';
@@ -29,6 +28,8 @@ export class ExportService {
   /** Markdown：根节点作为一级标题，子节点为嵌套无序列表（remark 序列化） */
   async toMarkdown(documentId: string, userId: string): Promise<string> {
     const { meta, tree } = await this.loadTree(documentId, userId);
+    // remark 是纯 ESM，Nest 编译为 CJS 时不能顶层 require，改动态 import
+    const { remark } = await import('remark');
 
     const toListItem = (node: TreeNode): ListItem => {
       const children: ListItem['children'] = [

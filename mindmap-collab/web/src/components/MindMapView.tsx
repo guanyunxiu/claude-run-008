@@ -42,7 +42,10 @@ export function MindMapView({ ydoc, snap }: Props) {
 
   // 由快照推导可见节点 + dagre 布局
   const layout = useMemo(() => {
-    const visible = [ROOT_ID, ...flattenVisible(snap).map((n) => n.id)];
+    // 注意：新文档首次打开时根节点可能尚未创建，必须过滤掉快照中不存在的 id
+    const visible = [ROOT_ID, ...flattenVisible(snap).map((n) => n.id)].filter(
+      (id) => snap.has(id),
+    );
     const visibleSet = new Set(visible);
 
     const g = new dagre.graphlib.Graph();

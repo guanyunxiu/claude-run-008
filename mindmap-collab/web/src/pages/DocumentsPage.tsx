@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { MembersPanel } from '../components/MembersPanel';
 
 interface DocMeta {
   id: string;
@@ -97,6 +98,7 @@ export function DocumentsPage() {
         </tbody>
       </table>
       {docs.length === 0 && <p className="empty-tip">暂无文档，点击上方创建。</p>}
+      {workspaceId && <MembersPanel workspaceId={workspaceId} />}
     </div>
   );
 }
