@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
+  Panel,
   applyNodeChanges,
   useReactFlow,
   type Edge,
@@ -14,10 +15,13 @@ import {
   NodesSnapshot,
   ROOT_ID,
   childrenOf,
+  clearManualPositions,
   createNode,
   deleteSubtree,
   flattenVisible,
   moveNode,
+  setPosition,
+  setSize,
   toggleCollapsed,
   updateText,
 } from '../model/tree';
@@ -33,12 +37,18 @@ interface Props {
   snap: NodesSnapshot;
 }
 
-/** 导图视图：dagre 自动布局，拖拽节点到另一节点上换父，空白处拖动同级排序 */
+/**
+ * 导图视图：
+ * - dagre 自动布局（未手动拖过的节点）
+ * - 拖到空白处 → 保持落点（自由坐标持久化到 Yjs）
+ * - 拖到其他节点上 → 变为其子节点并回归自动布局
+ * - 节点可缩放，尺寸持久化并参与 dagre 布局
+ */
 export function MindMapView({ ydoc, snap }: Props) {
   const { getIntersectingNodes } = useReactFlow();
   const [nodes, setNodes] = useState<Node<MindNodeData>[]>([]);
-  // 记录每个节点的布局坐标，拖拽排序时用于比较
-  const layoutPos = useRef(new Map<string, { x: number; y: number }>());
+  // 拖拽中不应用远端布局重置，避免打断当前拖拽
+  const dragging = useRef(false);
 
   // 由快照推导可见节点 + dagre 布局
   const layout = useMemo(() => {
@@ -51,23 +61,34 @@ export function MindMapView({ ydoc, snap }: Props) {
     const g = new dagre.graphlib.Graph();
     g.setGraph({ rankdir: 'LR', nodesep: 20, ranksep: 90, marginx: 30, marginy: 30 });
     g.setDefaultEdgeLabel(() => ({}));
-    visible.forEach((id) => g.setNode(id, { width: NODE_W, height: NODE_H }));
+    visible.forEach((id) => {
+      const n = snap.get(id)!;
+      g.setNode(id, {
+        width: n.width ?? NODE_W,
+        height: n.height ?? NODE_H,
+      });
+    });
     visible.forEach((id) => {
       const parentId = snap.get(id)?.parentId;
       if (parentId && visibleSet.has(parentId)) g.setEdge(parentId, id);
     });
     dagre.layout(g);
 
-    const pos = new Map<string, { x: number; y: number }>();
     const rfNodes: Node<MindNodeData>[] = visible.map((id) => {
       const n = snap.get(id)!;
+      const w = n.width ?? NODE_W;
+      const h = n.height ?? NODE_H;
       const p = g.node(id);
-      const position = { x: p.x - NODE_W / 2, y: p.y - NODE_H / 2 };
-      pos.set(id, position);
+      // 有手动坐标用手动坐标，否则用 dagre 布局坐标
+      const position =
+        n.x != null && n.y != null
+          ? { x: n.x, y: n.y }
+          : { x: p.x - w / 2, y: p.y - h / 2 };
       return {
         id,
         type: 'mind',
         position,
+        style: { width: w, height: h },
         data: {
           text: n.text,
           isRoot: id === ROOT_ID,
@@ -77,6 +98,8 @@ export function MindMapView({ ydoc, snap }: Props) {
           onAddChild: () =>
             createNode(ydoc, id, childrenOf(snap, id).length, ''),
           onCommitText: (text: string) => updateText(ydoc, id, text),
+          onResize: (width: number, height: number) =>
+            setSize(ydoc, id, width, height),
         },
       };
     });
@@ -94,37 +117,34 @@ export function MindMapView({ ydoc, snap }: Props) {
         style: { stroke: '#b1b1b7', strokeWidth: 1.5 },
       }));
 
-    return { rfNodes, rfEdges, pos };
+    return { rfNodes, rfEdges };
   }, [snap, ydoc]);
 
-  // 快照变化 → 同步到 React Flow 受控状态
+  // 快照变化 → 同步到 React Flow 受控状态（拖拽中除外）
   useEffect(() => {
-    layoutPos.current = layout.pos;
-    setNodes(layout.rfNodes);
+    if (!dragging.current) setNodes(layout.rfNodes);
   }, [layout]);
 
   const onNodesChange = (changes: NodeChange[]) =>
     setNodes((ns) => applyNodeChanges(changes, ns));
 
-  /** 拖拽结束：落在其他节点上 → 变为其子节点；否则按纵向位置在同级重排 */
+  /** 拖拽结束：落在其他节点上 → 变为其子节点；落在空白处 → 保持落点 */
   const onNodeDragStop = (_: any, node: Node) => {
-    if (node.id === ROOT_ID) return;
+    dragging.current = false;
     const intersections = getIntersectingNodes(node).filter(
       (n) => n.id !== node.id,
     );
-    if (intersections.length > 0) {
+    if (node.id !== ROOT_ID && intersections.length > 0) {
       const target = intersections[intersections.length - 1];
-      moveNode(ydoc, node.id, target.id, childrenOf(snap, target.id).length);
+      ydoc.transact(() => {
+        moveNode(ydoc, node.id, target.id, childrenOf(snap, target.id).length);
+        // 换父后回归自动布局
+        setPosition(ydoc, node.id, null, null);
+      });
       return;
     }
-    const parentId = snap.get(node.id)?.parentId;
-    if (!parentId) return;
-    const siblings = childrenOf(snap, parentId).filter((n) => n.id !== node.id);
-    const y = node.position.y;
-    const index = siblings.filter(
-      (s) => (layoutPos.current.get(s.id)?.y ?? 0) < y,
-    ).length;
-    moveNode(ydoc, node.id, parentId, index);
+    // 空白处落点：持久化自由坐标（根节点也可拖动）
+    setPosition(ydoc, node.id, node.position.x, node.position.y);
   };
 
   return (
@@ -133,6 +153,9 @@ export function MindMapView({ ydoc, snap }: Props) {
       edges={layout.rfEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
+      onNodeDragStart={() => {
+        dragging.current = true;
+      }}
       onNodeDragStop={onNodeDragStop}
       onNodesDelete={(deleted) =>
         deleted.forEach((n) => n.id !== ROOT_ID && deleteSubtree(ydoc, n.id))
@@ -145,6 +168,15 @@ export function MindMapView({ ydoc, snap }: Props) {
     >
       <Background gap={20} />
       <Controls showInteractive={false} />
+      <Panel position="top-left">
+        <button
+          className="map-toolbar-btn"
+          title="清除所有手动拖动的位置，重新自动布局"
+          onClick={() => clearManualPositions(ydoc)}
+        >
+          自动布局
+        </button>
+      </Panel>
     </ReactFlow>
   );
 }

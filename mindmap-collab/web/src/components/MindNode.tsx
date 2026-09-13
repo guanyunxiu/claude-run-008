@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Handle, Position, type NodeProps } from 'reactflow';
+import { Handle, NodeResizer, Position, type NodeProps } from 'reactflow';
 
 export interface MindNodeData {
   text: string;
@@ -9,9 +9,10 @@ export interface MindNodeData {
   onToggle: () => void;
   onAddChild: () => void;
   onCommitText: (text: string) => void;
+  onResize: (width: number, height: number) => void;
 }
 
-/** 导图自定义节点：文本（双击编辑）、折叠按钮、添加子节点按钮 */
+/** 导图自定义节点：文本（双击编辑）、折叠按钮、添加子节点按钮、选中时可缩放 */
 export function MindNode({ data, selected }: NodeProps<MindNodeData>) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(data.text);
@@ -30,6 +31,12 @@ export function MindNode({ data, selected }: NodeProps<MindNodeData>) {
       }`}
       onDoubleClick={() => setEditing(true)}
     >
+      <NodeResizer
+        isVisible={!!selected && !editing}
+        minWidth={100}
+        minHeight={36}
+        onResizeEnd={(_e, params) => data.onResize(params.width, params.height)}
+      />
       <Handle type="target" position={Position.Left} className="mind-handle" />
       {editing ? (
         <input

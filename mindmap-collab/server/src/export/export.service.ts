@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import * as Y from 'yjs';
 import { create } from 'xmlbuilder2';
 import type { Root, List, ListItem, RootContent } from 'mdast';
@@ -16,12 +16,24 @@ export class ExportService {
   private async loadTree(documentId: string, userId: string) {
     const meta = await this.documents.assertAccess(documentId, userId);
     const state = await this.collaboration.getCurrentState(documentId);
-    if (!state) throw new NotFoundException('文档内容为空');
-    const doc = new Y.Doc();
-    Y.applyUpdate(doc, new Uint8Array(state));
-    const tree = buildTree(readNodes(doc));
-    doc.destroy();
-    if (!tree) throw new NotFoundException('文档内容为空');
+    let tree: TreeNode | null = null;
+    if (state) {
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, new Uint8Array(state));
+      tree = buildTree(readNodes(doc));
+      doc.destroy();
+    }
+    // 文档还没有任何协同状态（新建未编辑）→ 导出仅含标题的空骨架，而非 404
+    if (!tree) {
+      tree = {
+        id: 'root',
+        parentId: null,
+        text: meta.title,
+        collapsed: false,
+        order: 0,
+        children: [],
+      };
+    }
     return { meta, tree };
   }
 

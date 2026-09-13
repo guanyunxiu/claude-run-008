@@ -13,6 +13,9 @@ import {
   flattenVisible,
   toggleCollapsed,
   updateText,
+  setPosition,
+  setSize,
+  clearManualPositions,
 } from '../web/src/model/tree.ts';
 
 let failures = 0;
@@ -73,6 +76,19 @@ deleteSubtree(doc, b);
 const snap = readSnapshot(doc);
 assert(!snap.has(b) && !snap.has(b1) && !snap.has(a), '删除 B 级联删除后代');
 assert(JSON.stringify(names(doc, ROOT_ID)) === '["C"]', '根层级只剩 C');
+
+console.log('== 自由坐标与尺寸 ==');
+setPosition(doc, c, 120, 240);
+let cn = readSnapshot(doc).get(c);
+assert(cn.x === 120 && cn.y === 240, '手动坐标持久化');
+setSize(doc, c, 260, 80);
+cn = readSnapshot(doc).get(c);
+assert(cn.width === 260 && cn.height === 80, '节点尺寸持久化');
+clearManualPositions(doc);
+cn = readSnapshot(doc).get(c);
+assert(cn.x === null && cn.y === null, '自动布局清除手动坐标');
+cn = readSnapshot(doc).get(c);
+assert(cn.width === 260, '清除坐标不影响尺寸');
 
 // ---------- 双客户端同步（模拟基础冲突合并） ----------
 console.log('== 双客户端同步 ==');

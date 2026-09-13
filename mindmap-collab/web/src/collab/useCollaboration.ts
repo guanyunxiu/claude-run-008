@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { IndexeddbPersistence } from 'y-indexeddb';
@@ -14,68 +14,51 @@ export interface PresenceUser {
   clientId: number;
 }
 
+export interface CollabSession {
+  ydoc: Y.Doc;
+  provider: HocuspocusProvider;
+  connected: boolean;
+  synced: boolean;
+  peers: PresenceUser[];
+}
+
+interface SessionResources {
+  ydoc: Y.Doc;
+  provider: HocuspocusProvider;
+}
+
 /**
  * 建立一篇文档的协同会话：
  * - HocuspocusProvider：WebSocket 房间（文档即房间），带 JWT 鉴权
  * - IndexeddbPersistence：本地离线缓存
  * - awareness：在线用户状态（头像、光标）
+ *
+ * 注意：资源在 useEffect 中创建/销毁（而非 useMemo），
+ * 否则 React StrictMode 双挂载会把 useMemo 缓存的 provider 提前销毁。
  */
 export function useCollaboration(
   documentId: string | undefined,
   user: { id: string; name: string } | null,
-) {
-  const [hasSynced, setHasSynced] = useState(false);
+): CollabSession | null {
+  const [resources, setResources] = useState<SessionResources | null>(null);
   const [connected, setConnected] = useState(false);
+  const [hasSynced, setHasSynced] = useState(false);
   const [peers, setPeers] = useState<PresenceUser[]>([]);
 
-  const ydoc = useMemo(() => new Y.Doc(), [documentId]);
-
-  const provider = useMemo(() => {
-    if (!documentId) return null;
+  // 创建/销毁会话资源
+  useEffect(() => {
+    if (!documentId) return;
+    const ydoc = new Y.Doc();
     const token = localStorage.getItem('token') || '';
-    return new HocuspocusProvider({
+    const provider = new HocuspocusProvider({
       url: WS_URL,
       name: `document:${documentId}`,
       document: ydoc,
       token,
     });
-  }, [documentId, ydoc]);
+    const idb = new IndexeddbPersistence(`mindmap-${documentId}`, ydoc);
 
-  const idb = useMemo(() => {
-    if (!documentId) return null;
-    return new IndexeddbPersistence(`mindmap-${documentId}`, ydoc);
-  }, [documentId, ydoc]);
-
-  // awareness：广播本地用户信息，订阅在线列表
-  useEffect(() => {
-    if (!provider || !user) return;
-    const color =
-      COLORS[Math.abs(hashCode(user.id)) % COLORS.length];
-    provider.setAwarenessField('user', {
-      id: user.id,
-      name: user.name,
-      color,
-    });
-    const awareness = provider.awareness;
-    if (!awareness) return;
-    const update = () => {
-      const states = awareness.getStates();
-      const list: PresenceUser[] = [];
-      states.forEach((state: any, clientId: number) => {
-        if (state.user) list.push({ ...state.user, clientId });
-      });
-      setPeers(list);
-    };
-    awareness.on('change', update);
-    update();
-    return () => {
-      awareness.off('change', update);
-    };
-  }, [provider, user]);
-
-  // 首次同步完成后确保根节点存在；同时跟踪连接状态（断线时及时反馈）
-  useEffect(() => {
-    if (!provider) return;
+    // 构造后立即同步挂监听，不会错过任何事件
     const onSynced = () => {
       ensureRoot(ydoc);
       setHasSynced(true);
@@ -85,26 +68,58 @@ export function useCollaboration(
     };
     provider.on('synced', onSynced);
     provider.on('status', onStatus);
-    if (idb) {
-      idb.on('synced', () => ensureRoot(ydoc));
-    }
-    return () => {
-      provider.off('synced', onSynced);
-      provider.off('status', onStatus);
-    };
-  }, [provider, idb, ydoc]);
+    // 用当前状态兜底，防止连接事件先于监听注册
+    setConnected(provider.status === 'connected');
+    idb.on('synced', () => ensureRoot(ydoc));
 
-  // 卸载时释放连接
-  useEffect(() => {
+    setResources({ ydoc, provider });
+
     return () => {
-      provider?.destroy();
-      idb?.destroy();
+      provider.destroy();
+      idb.destroy();
       ydoc.destroy();
+      setResources(null);
+      setConnected(false);
+      setHasSynced(false);
+      setPeers([]);
     };
-  }, [provider, idb, ydoc]);
+  }, [documentId]);
 
-  // 已同步 = 至少完成过一次同步 且 当前处于连接状态（断线立即变为未同步）
-  return { ydoc, provider, connected, synced: connected && hasSynced, peers };
+  // awareness：广播本地用户信息，订阅在线列表
+  useEffect(() => {
+    const provider = resources?.provider;
+    if (!provider || !user) return;
+    const color = COLORS[Math.abs(hashCode(user.id)) % COLORS.length];
+    provider.setAwarenessField('user', {
+      id: user.id,
+      name: user.name,
+      color,
+    });
+    const awareness = provider.awareness;
+    if (!awareness) return;
+    const update = () => {
+      const list: PresenceUser[] = [];
+      awareness.getStates().forEach((state: any, clientId: number) => {
+        if (state.user) list.push({ ...state.user, clientId });
+      });
+      setPeers(list);
+    };
+    awareness.on('change', update);
+    update();
+    return () => {
+      awareness.off('change', update);
+    };
+  }, [resources, user]);
+
+  if (!resources) return null;
+  return {
+    ydoc: resources.ydoc,
+    provider: resources.provider,
+    connected,
+    // 已同步 = 完成过首次同步 且 当前在线（断线立即降级为未同步）
+    synced: connected && hasSynced,
+    peers,
+  };
 }
 
 function hashCode(s: string) {

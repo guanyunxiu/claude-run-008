@@ -14,6 +14,12 @@ export interface MindNode {
   text: string;
   collapsed: boolean;
   order: number;
+  /** 手动拖拽后的自由坐标（null 表示跟随自动布局） */
+  x: number | null;
+  y: number | null;
+  /** 手动调整的尺寸（null 表示默认尺寸） */
+  width: number | null;
+  height: number | null;
 }
 
 export type NodesSnapshot = Map<string, MindNode>;
@@ -33,6 +39,10 @@ export function readSnapshot(doc: Y.Doc): NodesSnapshot {
       text: (ynode.get('text') as string) ?? '',
       collapsed: (ynode.get('collapsed') as boolean) ?? false,
       order: (ynode.get('order') as number) ?? 0,
+      x: (ynode.get('x') as number) ?? null,
+      y: (ynode.get('y') as number) ?? null,
+      width: (ynode.get('width') as number) ?? null,
+      height: (ynode.get('height') as number) ?? null,
     });
   });
   return snap;
@@ -153,6 +163,41 @@ export function createNode(
 
 export function updateText(doc: Y.Doc, id: string, text: string) {
   getNodesMap(doc).get(id)?.set('text', text);
+}
+
+/** 记录手动拖拽位置（传 null 清除，回到自动布局） */
+export function setPosition(
+  doc: Y.Doc,
+  id: string,
+  x: number | null,
+  y: number | null,
+) {
+  const node = getNodesMap(doc).get(id);
+  if (!node) return;
+  doc.transact(() => {
+    node.set('x', x);
+    node.set('y', y);
+  });
+}
+
+/** 记录手动调整的节点尺寸 */
+export function setSize(doc: Y.Doc, id: string, width: number, height: number) {
+  const node = getNodesMap(doc).get(id);
+  if (!node) return;
+  doc.transact(() => {
+    node.set('width', width);
+    node.set('height', height);
+  });
+}
+
+/** 清除所有节点的手动坐标，恢复全量自动布局 */
+export function clearManualPositions(doc: Y.Doc) {
+  doc.transact(() => {
+    getNodesMap(doc).forEach((ynode) => {
+      ynode.set('x', null);
+      ynode.set('y', null);
+    });
+  });
 }
 
 export function setCollapsed(doc: Y.Doc, id: string, collapsed: boolean) {
