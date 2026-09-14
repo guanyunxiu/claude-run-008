@@ -14,11 +14,30 @@ export class MetricsService {
   conflicts = 0;
   errors = 0;
   wsAuthFailures = 0;
+  snapshots = 0;
+  snapshotBytes = 0;
+  rateLimitRejections = 0;
+  gcDeletedOps = 0;
+  gcDeletedSnapshots = 0;
   private latencies: number[] = [];
   private readonly window = 200;
 
   recordUpdate() {
     this.updates += 1;
+  }
+
+  recordSnapshot(bytes: number) {
+    this.snapshots += 1;
+    this.snapshotBytes += bytes;
+  }
+
+  recordRateLimit() {
+    this.rateLimitRejections += 1;
+  }
+
+  recordGc(ops: number, snapshots: number) {
+    this.gcDeletedOps += ops;
+    this.gcDeletedSnapshots += snapshots;
   }
 
   recordPersistLatency(ms: number) {
@@ -53,6 +72,9 @@ export class MetricsService {
       conflicts: this.conflicts,
       errors: this.errors,
       wsAuthFailures: this.wsAuthFailures,
+      snapshots: { count: this.snapshots, bytes: this.snapshotBytes },
+      rateLimitRejections: this.rateLimitRejections,
+      gc: { deletedOps: this.gcDeletedOps, deletedSnapshots: this.gcDeletedSnapshots },
       uptime: Math.round(process.uptime()),
     };
   }

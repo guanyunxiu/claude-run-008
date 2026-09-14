@@ -56,6 +56,7 @@ model Branch {
   documentId   String
   name         String
   isMain       Boolean  @default(false)
+  protected    Boolean  @default(false) // 保护分支：仅 owner 可合并/直接推送
   createdById  String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -89,18 +90,36 @@ model Operation {
 }
 
 model Snapshot {
-  id         String   @id @default(cuid())
-  documentId String
-  branchId   String?
-  opSeq      Int? // 快照时刻分支的操作序号（增量重建起点）
-  state      Bytes
-  label      String?
-  createdAt  DateTime @default(now())
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  id             String   @id @default(cuid())
+  documentId     String
+  branchId       String?
+  opSeq          Int? // 快照时刻分支的操作序号（增量重建起点）
+  // kind=full：完整状态；kind=incremental：相对 baseSnapshotId 的增量更新
+  kind           String   @default("full")
+  baseSnapshotId String?
+  state          Bytes // 压缩后的载荷（小快照）；大快照存 chunks
+  compression    String? // 'gzip' | null
+  checksum       String? // 完整未压缩状态的 sha256（一致性校验用）
+  formatVersion  Int      @default(2) // 快照格式版本（数据迁移/兼容用）
+  chunked        Boolean  @default(false) // 大文档分片存储
+  label          String?
+  createdAt      DateTime @default(now())
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  branch         Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  chunks         SnapshotChunk[]
 
   @@index([documentId, createdAt])
   @@index([branchId, opSeq])
+}
+
+model SnapshotChunk {
+  id         String   @id @default(cuid())
+  snapshotId String
+  index      Int // 分片序号
+  data       Bytes
+  snapshot   Snapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, index])
 }
 
 model MergeRequest {

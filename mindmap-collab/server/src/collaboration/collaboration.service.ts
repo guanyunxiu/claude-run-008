@@ -5,12 +5,15 @@ import * as Y from 'yjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { SnapshotStorageService } from '../snapshots/snapshot-storage.service';
 
 const SNAPSHOT_OP_THRESHOLD = 100; // 每 100 次操作自动快照
 const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000; // 或每 5 分钟自动快照
 const TICK_MS = 30 * 1000;
-const OP_FLUSH_INTERVAL_MS = 2000; // 操作日志批量落库间隔
 const OP_FLUSH_BATCH = 100;
+const MAX_UPDATE_BYTES = 256 * 1024; // 单条更新消息大小上限
+const RATE_LIMIT_OPS = 200; // 每用户 10s 内最多 200 次更新（背压）
+const RATE_LIMIT_WINDOW_MS = 10 * 1000;
 
 interface DocStats {
   opsSinceSnapshot: number;
@@ -57,6 +60,7 @@ export class CollaborationService implements OnModuleInit, OnModuleDestroy {
     private redis: RedisService,
     private jwt: JwtService,
     private metrics: MetricsService,
+    private snapshotStorage: SnapshotStorageService,
   ) {}
 
   /* ---------- 房间命名 ---------- */
@@ -149,6 +153,16 @@ export class CollaborationService implements OnModuleInit, OnModuleDestroy {
       },
 
       onChange: async ({ document, documentName, context, update }) => {
+        // 消息大小限制
+        if (update.length > MAX_UPDATE_BYTES) {
+          this.metrics.recordRateLimit();
+          throw new Error('update exceeds max message size');
+        }
+        // 限流/背压：滑动窗口内超频的连接直接拒绝
+        if (!this.checkRateLimit(context?.user?.id ?? 'anonymous')) {
+          this.metrics.recordRateLimit();
+          throw new Error('rate limit exceeded');
+        }
         const branchId = context?.branchId ?? (await this.resolveBranchId(this.parseRoom(documentName)));
         const stats = this.ensureStats(branchId);
         stats.opsSinceSnapshot += 1;
@@ -251,6 +265,23 @@ export class CollaborationService implements OnModuleInit, OnModuleDestroy {
     return s;
   }
 
+  /** 滑动窗口限流（每用户） */
+  private rateWindows = new Map<string, number[]>();
+  private checkRateLimit(userId: string): boolean {
+    const now = Date.now();
+    let window = this.rateWindows.get(userId);
+    if (!window) {
+      window = [];
+      this.rateWindows.set(userId, window);
+    }
+    while (window.length && window[0] < now - RATE_LIMIT_WINDOW_MS) {
+      window.shift();
+    }
+    if (window.length >= RATE_LIMIT_OPS) return false;
+    window.push(now);
+    return true;
+  }
+
   private async tick() {
     await this.flushOperations();
     for (const [branchId, stats] of this.stats) {
@@ -294,7 +325,7 @@ export class CollaborationService implements OnModuleInit, OnModuleDestroy {
     await this.flushOperations();
   }
 
-  /** 生成快照（内存优先，退化到数据库） */
+  /** 生成快照（内存优先，退化到数据库）；走快照链 + 压缩 + 校验和 */
   async createSnapshot(branchId: string, label: string) {
     try {
       const state = await this.getBranchState(branchId);
@@ -305,18 +336,22 @@ export class CollaborationService implements OnModuleInit, OnModuleDestroy {
       });
       if (!branch) return;
       const stats = this.ensureStats(branchId);
-      await this.prisma.snapshot.create({
-        data: {
-          documentId: branch.documentId,
-          branchId,
-          opSeq: stats.lastOpSeq,
-          state: new Uint8Array(state),
-          label,
-        },
+      const doc = new Y.Doc();
+      Y.applyUpdate(doc, new Uint8Array(state));
+      const vector = this.decodeVector(doc);
+      doc.destroy();
+      await this.snapshotStorage.write({
+        documentId: branch.documentId,
+        branchId,
+        opSeq: stats.lastOpSeq,
+        label,
+        state: new Uint8Array(state),
+        vector,
       });
       stats.opsSinceSnapshot = 0;
       stats.lastSnapshotAt = Date.now();
       stats.dirty = false;
+      this.metrics.recordSnapshot(state.length);
       this.logger.log(`snapshot created for branch ${branchId} (${label})`);
     } catch (e) {
       this.logger.error(`snapshot failed for branch ${branchId}`, e as Error);
