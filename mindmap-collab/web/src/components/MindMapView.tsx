@@ -35,6 +35,7 @@ const nodeTypes = { mind: MindNode };
 interface Props {
   ydoc: Y.Doc;
   snap: NodesSnapshot;
+  readOnly?: boolean;
 }
 
 /**
@@ -44,7 +45,7 @@ interface Props {
  * - 拖到其他节点上 → 变为其子节点并回归自动布局
  * - 节点可缩放，尺寸持久化并参与 dagre 布局
  */
-export function MindMapView({ ydoc, snap }: Props) {
+export function MindMapView({ ydoc, snap, readOnly = false }: Props) {
   const { getIntersectingNodes } = useReactFlow();
   const [nodes, setNodes] = useState<Node<MindNodeData>[]>([]);
   // 拖拽中不应用远端布局重置，避免打断当前拖拽
@@ -94,6 +95,7 @@ export function MindMapView({ ydoc, snap }: Props) {
           isRoot: id === ROOT_ID,
           collapsed: n.collapsed,
           childCount: childrenOf(snap, id).length,
+          readOnly,
           onToggle: () => toggleCollapsed(ydoc, id),
           onAddChild: () =>
             createNode(ydoc, id, childrenOf(snap, id).length, ''),
@@ -118,7 +120,7 @@ export function MindMapView({ ydoc, snap }: Props) {
       }));
 
     return { rfNodes, rfEdges };
-  }, [snap, ydoc]);
+  }, [snap, ydoc, readOnly]);
 
   // 快照变化 → 同步到 React Flow 受控状态（拖拽中除外）
   useEffect(() => {
@@ -131,6 +133,7 @@ export function MindMapView({ ydoc, snap }: Props) {
   /** 拖拽结束：落在其他节点上 → 变为其子节点；落在空白处 → 保持落点 */
   const onNodeDragStop = (_: any, node: Node) => {
     dragging.current = false;
+    if (readOnly) return;
     const intersections = getIntersectingNodes(node).filter(
       (n) => n.id !== node.id,
     );
@@ -160,7 +163,8 @@ export function MindMapView({ ydoc, snap }: Props) {
       onNodesDelete={(deleted) =>
         deleted.forEach((n) => n.id !== ROOT_ID && deleteSubtree(ydoc, n.id))
       }
-      deleteKeyCode={['Backspace', 'Delete']}
+      deleteKeyCode={readOnly ? null : ['Backspace', 'Delete']}
+      nodesDraggable={!readOnly}
       fitView
       minZoom={0.2}
       proOptions={{ hideAttribution: true }}
@@ -168,15 +172,17 @@ export function MindMapView({ ydoc, snap }: Props) {
     >
       <Background gap={20} />
       <Controls showInteractive={false} />
-      <Panel position="top-left">
-        <button
-          className="map-toolbar-btn"
-          title="清除所有手动拖动的位置，重新自动布局"
-          onClick={() => clearManualPositions(ydoc)}
-        >
-          自动布局
-        </button>
-      </Panel>
+      {!readOnly && (
+        <Panel position="top-left">
+          <button
+            className="map-toolbar-btn"
+            title="清除所有手动拖动的位置，重新自动布局"
+            onClick={() => clearManualPositions(ydoc)}
+          >
+            自动布局
+          </button>
+        </Panel>
+      )}
     </ReactFlow>
   );
 }

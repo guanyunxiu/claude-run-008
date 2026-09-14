@@ -15,6 +15,7 @@ interface Props {
   item: OutlineItem;
   /** 拖拽中：投影计算出的临时缩进深度 */
   projectedDepth?: number;
+  readOnly?: boolean;
   focusRequested: boolean;
   onFocusHandled: () => void;
   onToggle: () => void;
@@ -26,6 +27,7 @@ interface Props {
 export function OutlineRow({
   item,
   projectedDepth,
+  readOnly = false,
   focusRequested,
   onFocusHandled,
   onToggle,
@@ -40,7 +42,7 @@ export function OutlineRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.id, disabled: readOnly });
 
   useEffect(() => {
     if (focusRequested && inputRef.current) {
@@ -61,7 +63,10 @@ export function OutlineRow({
         paddingLeft: depth * 24 + 4,
       }}
     >
-      <span className="outline-handle" {...attributes} {...listeners}>
+      <span
+        className="outline-handle"
+        {...(readOnly ? {} : { ...attributes, ...listeners })}
+      >
         ⠿
       </span>
       {item.childCount > 0 ? (
@@ -76,8 +81,10 @@ export function OutlineRow({
         className="outline-input"
         value={item.text}
         placeholder="输入内容…"
+        readOnly={readOnly}
         onChange={(e) => onTextChange(e.target.value)}
         onKeyDown={(e) => {
+          if (readOnly) return;
           if (e.key === 'Enter') {
             e.preventDefault();
             onKeyCommand('enter');

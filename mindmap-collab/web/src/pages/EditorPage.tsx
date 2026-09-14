@@ -19,6 +19,7 @@ export function EditorPage() {
   const navigate = useNavigate();
   const { user, loadMe } = useAuth();
   const [title, setTitle] = useState('');
+  const [role, setRole] = useState<string>('editor');
   const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
@@ -27,10 +28,14 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!documentId) return;
-    api.get(`/documents/${documentId}`).then(({ data }) => setTitle(data.title));
+    api.get(`/documents/${documentId}`).then(({ data }) => {
+      setTitle(data.title);
+      setRole(data.role || 'editor');
+    });
   }, [documentId]);
 
   const collab = useCollaboration(documentId, user);
+  const readOnly = role === 'viewer';
 
   if (!documentId) return null;
 
@@ -52,7 +57,9 @@ export function EditorPage() {
           value={title}
           onChange={(e) => rename(e.target.value)}
           placeholder="文档标题"
+          readOnly={readOnly}
         />
+        {readOnly && <span className="readonly-badge">只读</span>}
         {collab && (
           <span
             className={`sync-status ${collab.synced ? 'synced' : ''} ${
@@ -74,6 +81,7 @@ export function EditorPage() {
         <EditorWorkspace
           documentId={documentId}
           collab={collab}
+          readOnly={readOnly}
           historyOpen={historyOpen}
           onCloseHistory={() => setHistoryOpen(false)}
         />
@@ -88,11 +96,13 @@ export function EditorPage() {
 function EditorWorkspace({
   documentId,
   collab,
+  readOnly,
   historyOpen,
   onCloseHistory,
 }: {
   documentId: string;
   collab: CollabSession;
+  readOnly: boolean;
   historyOpen: boolean;
   onCloseHistory: () => void;
 }) {
@@ -125,7 +135,7 @@ function EditorWorkspace({
     <div className="editor-split" ref={containerRef}>
       <div className="editor-pane editor-pane-map">
         <ReactFlowProvider>
-          <MindMapView ydoc={collab.ydoc} snap={snap} />
+          <MindMapView ydoc={collab.ydoc} snap={snap} readOnly={readOnly} />
         </ReactFlowProvider>
       </div>
       <div
@@ -148,7 +158,7 @@ function EditorWorkspace({
           visibility: outlineOpen ? 'visible' : 'hidden',
         }}
       >
-        <OutlineView ydoc={collab.ydoc} snap={snap} />
+        <OutlineView ydoc={collab.ydoc} snap={snap} readOnly={readOnly} />
       </div>
       <HistoryPanel
         documentId={documentId}

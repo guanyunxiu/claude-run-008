@@ -40,6 +40,15 @@ export class WorkspacesService {
     return member;
   }
 
+  /** 校验用户在工作区中拥有指定角色之一 */
+  async assertRole(workspaceId: string, userId: string, roles: string[]) {
+    const member = await this.assertMember(workspaceId, userId);
+    if (!roles.includes(member.role)) {
+      throw new ForbiddenException('权限不足：该操作需要 ' + roles.join(' / '));
+    }
+    return member;
+  }
+
   async assertExists(workspaceId: string) {
     const ws = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -58,14 +67,14 @@ export class WorkspacesService {
     });
   }
 
-  /** 通过邮箱邀请成员（任何现有成员均可邀请） */
+  /** 通过邮箱邀请成员（仅所有者） */
   async addMember(
     workspaceId: string,
     requesterId: string,
     email: string,
     role = 'editor',
   ) {
-    await this.assertMember(workspaceId, requesterId);
+    await this.assertRole(workspaceId, requesterId, ['owner']);
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) throw new NotFoundException('该邮箱对应的用户不存在');
     const existing = await this.prisma.workspaceMember.findUnique({

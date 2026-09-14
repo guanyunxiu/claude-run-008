@@ -21,17 +21,18 @@ export class ExportController {
     @CurrentUser() user: any,
     @Param('id') id: string,
     @Query('format') format: string,
+    @Query('branchId') branchId: string,
     @Res() res: Response,
   ) {
     if (format === 'opml') {
-      const xml = await this.exporter.toOpml(id, user.id);
+      const xml = await this.exporter.toOpml(id, user.id, branchId || undefined);
       res.set({
         'Content-Type': 'text/x-opml; charset=utf-8',
         'Content-Disposition': `attachment; filename="mindmap-${id}.opml"`,
       });
       return res.send(xml);
     }
-    const md = await this.exporter.toMarkdown(id, user.id);
+    const md = await this.exporter.toMarkdown(id, user.id, branchId || undefined);
     res.set({
       'Content-Type': 'text/markdown; charset=utf-8',
       'Content-Disposition': `attachment; filename="mindmap-${id}.md"`,

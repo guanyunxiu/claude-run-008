@@ -1,4 +1,4 @@
-// Prisma 数据模型：用户、工作区、成员、文档元数据 + Yjs 快照
+// Prisma 数据模型：用户、工作区、成员、文档、分支、操作日志、快照、合并请求、审计
 generator client {
   provider = "prisma-client-js"
 }
@@ -28,7 +28,7 @@ model Workspace {
 
 model WorkspaceMember {
   id          String    @id @default(cuid())
-  role        String    @default("editor") // owner | editor | viewer
+  role        String    @default("editor") // owner | editor | commenter | viewer
   userId      String
   workspaceId String
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -42,21 +42,94 @@ model Document {
   title       String     @default("未命名文档")
   workspaceId String
   createdById String
-  yjsState    Bytes? // Yjs 文档二进制状态（Y.encodeStateAsUpdate）
+  yjsState    Bytes? // 旧版单分支状态（迁移后仅作兜底）
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdBy   User       @relation(fields: [createdById], references: [id])
   snapshots   Snapshot[]
+  branches    Branch[]
+}
+
+model Branch {
+  id           String   @id @default(cuid())
+  documentId   String
+  name         String
+  isMain       Boolean  @default(false)
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  yjsState     Bytes? // 分支当前 Yjs 状态
+  baseBranchId String? // 分叉来源分支
+  baseVector   Json? // 分叉点版本向量 {clientId: clock}
+  forkState    Bytes? // 分叉点完整状态（共同祖先重建用）
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  operations   Operation[]
+  snapshots    Snapshot[]
+
+  @@index([documentId])
+}
+
+model Operation {
+  id         String   @id @default(cuid())
+  seq        Int      @unique @default(autoincrement()) // 全局单调序号（回放/重建定位）
+  branchId   String
+  documentId String
+  userId     String?
+  userName   String?
+  type       String   @default("update") // update | merge | restore
+  update     Bytes? // Yjs 增量更新
+  vector     Json? // 该操作后的版本向量
+  meta       Json? // 合并双方、冲突数等附加信息
+  createdAt  DateTime @default(now())
+  branch     Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, seq])
+  @@index([branchId, createdAt])
 }
 
 model Snapshot {
   id         String   @id @default(cuid())
   documentId String
-  state      Bytes // 该版本的 Yjs 二进制状态
-  label      String? // 快照说明，如 "auto(100 ops)" / "auto(5min)" / "restore"
+  branchId   String?
+  opSeq      Int? // 快照时刻分支的操作序号（增量重建起点）
+  state      Bytes
+  label      String?
   createdAt  DateTime @default(now())
   document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+  @@index([branchId, opSeq])
+}
+
+model MergeRequest {
+  id             String   @id @default(cuid())
+  documentId     String
+  sourceBranchId String
+  targetBranchId String
+  title          String
+  status         String   @default("open") // open | merged | closed
+  mergeKey       String   @unique // 幂等键：防止重复提交
+  conflicts      Json? // 检测到的冲突列表
+  resolutions    Json? // 冲突解决结果
+  createdById    String
+  createdAt      DateTime @default(now())
+  mergedAt       DateTime?
+  mergedById     String?
+
+  @@index([documentId, status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  documentId String?
+  branchId   String?
+  userId     String?
+  userName   String?
+  action     String // branch.create / merge.submit / snapshot.restore / member.add ...
+  detail     Json?
+  createdAt  DateTime @default(now())
 
   @@index([documentId, createdAt])
 }

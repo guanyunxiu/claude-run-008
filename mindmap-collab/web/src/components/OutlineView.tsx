@@ -85,10 +85,11 @@ function getProjection(
 interface Props {
   ydoc: Y.Doc;
   snap: NodesSnapshot;
+  readOnly?: boolean;
 }
 
 /** 大纲视图：树形列表，支持拖拽换父/排序、Tab 缩进、Shift+Tab 反缩进、回车新建 */
-export function OutlineView({ ydoc, snap }: Props) {
+export function OutlineView({ ydoc, snap, readOnly = false }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [offsetLeft, setOffsetLeft] = useState(0);
   const [projected, setProjected] = useState<Projection | null>(null);
@@ -135,6 +136,10 @@ export function OutlineView({ ydoc, snap }: Props) {
   };
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (readOnly) {
+      resetDrag();
+      return;
+    }
     if (over && projected && active.id !== over.id) {
       const activeIndex = items.findIndex((i) => i.id === active.id);
       const overIndex = items.findIndex((i) => i.id === over.id);
@@ -210,6 +215,7 @@ export function OutlineView({ ydoc, snap }: Props) {
             <OutlineRow
               key={item.id}
               item={item}
+              readOnly={readOnly}
               projectedDepth={
                 activeId === item.id && projected ? projected.depth : undefined
               }
@@ -222,20 +228,22 @@ export function OutlineView({ ydoc, snap }: Props) {
           ))}
         </SortableContext>
       </DndContext>
-      <button
-        className="outline-add-root"
-        onClick={() => {
-          const id = createNode(
-            ydoc,
-            ROOT_ID,
-            childrenOf(snap, ROOT_ID).length,
-            '',
-          );
-          setFocusId(id);
-        }}
-      >
-        + 添加主题
-      </button>
+      {!readOnly && (
+        <button
+          className="outline-add-root"
+          onClick={() => {
+            const id = createNode(
+              ydoc,
+              ROOT_ID,
+              childrenOf(snap, ROOT_ID).length,
+              '',
+            );
+            setFocusId(id);
+          }}
+        >
+          + 添加主题
+        </button>
+      )}
     </div>
   );
 }

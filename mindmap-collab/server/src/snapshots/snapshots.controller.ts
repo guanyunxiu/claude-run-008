@@ -3,6 +3,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -15,8 +16,12 @@ export class SnapshotsController {
   constructor(private snapshots: SnapshotsService) {}
 
   @Get()
-  list(@CurrentUser() user: any, @Param('documentId') documentId: string) {
-    return this.snapshots.list(documentId, user.id);
+  list(
+    @CurrentUser() user: any,
+    @Param('documentId') documentId: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    return this.snapshots.list(documentId, user.id, branchId);
   }
 
   @Get(':snapshotId/preview')

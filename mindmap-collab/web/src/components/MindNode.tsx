@@ -6,6 +6,7 @@ export interface MindNodeData {
   isRoot: boolean;
   collapsed: boolean;
   childCount: number;
+  readOnly?: boolean;
   onToggle: () => void;
   onAddChild: () => void;
   onCommitText: (text: string) => void;
@@ -29,10 +30,10 @@ export function MindNode({ data, selected }: NodeProps<MindNodeData>) {
       className={`mind-node ${data.isRoot ? 'mind-node-root' : ''} ${
         selected ? 'mind-node-selected' : ''
       }`}
-      onDoubleClick={() => setEditing(true)}
+      onDoubleClick={() => !data.readOnly && setEditing(true)}
     >
       <NodeResizer
-        isVisible={!!selected && !editing}
+        isVisible={!!selected && !editing && !data.readOnly}
         minWidth={100}
         minHeight={36}
         onResizeEnd={(_e, params) => data.onResize(params.width, params.height)}
@@ -68,16 +69,18 @@ export function MindNode({ data, selected }: NodeProps<MindNodeData>) {
           {data.collapsed ? data.childCount : '−'}
         </button>
       )}
-      <button
-        className="mind-node-add nodrag"
-        title="添加子节点"
-        onClick={(e) => {
-          e.stopPropagation();
-          data.onAddChild();
-        }}
-      >
-        +
-      </button>
+      {!data.readOnly && (
+        <button
+          className="mind-node-add nodrag"
+          title="添加子节点"
+          onClick={(e) => {
+            e.stopPropagation();
+            data.onAddChild();
+          }}
+        >
+          +
+        </button>
+      )}
       <Handle type="source" position={Position.Right} className="mind-handle" />
     </div>
   );

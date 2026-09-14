@@ -1,27 +1,64 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as Y from 'yjs';
 import { create } from 'xmlbuilder2';
 import type { Root, List, ListItem, RootContent } from 'mdast';
 import { DocumentsService } from '../documents/documents.service';
 import { CollaborationService } from '../collaboration/collaboration.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { buildTree, readNodes, TreeNode } from '../collaboration/tree.util';
+
+/**
+ * remark 是纯 ESM 包。tsc 会把 import() 降级为 require()，
+ * 而不支持 require(ESM) 的 Node 版本会直接抛 ERR_REQUIRE_ESM（导出 500 的根因）。
+ * 用 Function 保留真正的动态 import，兼容所有 Node 版本。
+ */
+let remarkPromise: Promise<typeof import('remark')> | null = null;
+function loadRemark() {
+  if (!remarkPromise) {
+    remarkPromise = new Function('return import("remark")')() as Promise<
+      typeof import('remark')
+    >;
+  }
+  return remarkPromise;
+}
 
 @Injectable()
 export class ExportService {
+  private readonly logger = new Logger(ExportService.name);
+
   constructor(
     private documents: DocumentsService,
     private collaboration: CollaborationService,
+    private prisma: PrismaService,
   ) {}
 
-  private async loadTree(documentId: string, userId: string) {
+  private async loadTree(documentId: string, userId: string, branchId?: string) {
     const meta = await this.documents.assertAccess(documentId, userId);
-    const state = await this.collaboration.getCurrentState(documentId);
+    // 未指定分支时导出主分支
+    const targetBranchId =
+      branchId ??
+      (
+        await this.prisma.branch.findFirst({
+          where: { documentId, isMain: true },
+          select: { id: true },
+        })
+      )?.id;
+    const state = targetBranchId
+      ? await this.collaboration.getBranchState(targetBranchId)
+      : null;
     let tree: TreeNode | null = null;
     if (state) {
-      const doc = new Y.Doc();
-      Y.applyUpdate(doc, new Uint8Array(state));
-      tree = buildTree(readNodes(doc));
-      doc.destroy();
+      try {
+        const doc = new Y.Doc();
+        Y.applyUpdate(doc, new Uint8Array(state));
+        tree = buildTree(readNodes(doc));
+        doc.destroy();
+      } catch (e) {
+        // 状态损坏不应导致 500，按空文档导出
+        this.logger.warn(
+          `failed to decode yjs state of ${documentId}: ${(e as Error).message}`,
+        );
+      }
     }
     // 文档还没有任何协同状态（新建未编辑）→ 导出仅含标题的空骨架，而非 404
     if (!tree) {
@@ -38,10 +75,13 @@ export class ExportService {
   }
 
   /** Markdown：根节点作为一级标题，子节点为嵌套无序列表（remark 序列化） */
-  async toMarkdown(documentId: string, userId: string): Promise<string> {
-    const { meta, tree } = await this.loadTree(documentId, userId);
-    // remark 是纯 ESM，Nest 编译为 CJS 时不能顶层 require，改动态 import
-    const { remark } = await import('remark');
+  async toMarkdown(
+    documentId: string,
+    userId: string,
+    branchId?: string,
+  ): Promise<string> {
+    const { remark } = await loadRemark();
+    const { meta, tree } = await this.loadTree(documentId, userId, branchId);
 
     const toListItem = (node: TreeNode): ListItem => {
       const children: ListItem['children'] = [
@@ -82,8 +122,12 @@ export class ExportService {
   }
 
   /** OPML 2.0：outline 嵌套结构（xmlbuilder2 生成） */
-  async toOpml(documentId: string, userId: string): Promise<string> {
-    const { meta, tree } = await this.loadTree(documentId, userId);
+  async toOpml(
+    documentId: string,
+    userId: string,
+    branchId?: string,
+  ): Promise<string> {
+    const { meta, tree } = await this.loadTree(documentId, userId, branchId);
 
     const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele('opml', {
       version: '2.0',

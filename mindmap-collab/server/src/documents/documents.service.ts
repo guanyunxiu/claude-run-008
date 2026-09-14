@@ -29,7 +29,7 @@ export class DocumentsService {
   }
 
   async create(workspaceId: string, userId: string, title: string) {
-    await this.workspaces.assertMember(workspaceId, userId);
+    await this.workspaces.assertRole(workspaceId, userId, ['owner', 'editor']);
     return this.prisma.document.create({
       data: { workspaceId, createdById: userId, title: title || '未命名文档' },
     });
@@ -45,14 +45,26 @@ export class DocumentsService {
     return doc;
   }
 
+  /** 校验用户对该文档有编辑权限（owner / editor） */
+  async assertCanEdit(documentId: string, userId: string) {
+    const doc = await this.assertAccess(documentId, userId);
+    await this.workspaces.assertRole(doc.workspaceId, userId, [
+      'owner',
+      'editor',
+    ]);
+    return doc;
+  }
+
   async get(documentId: string, userId: string) {
     const doc = await this.assertAccess(documentId, userId);
+    const member = await this.workspaces.assertMember(doc.workspaceId, userId);
     const { yjsState, ...rest } = doc;
-    return { ...rest, hasState: !!yjsState };
+    // 返回当前用户在该文档上的角色，前端据此切换只读模式
+    return { ...rest, hasState: !!yjsState, role: member.role };
   }
 
   async rename(documentId: string, userId: string, title: string) {
-    await this.assertAccess(documentId, userId);
+    await this.assertCanEdit(documentId, userId);
     return this.prisma.document.update({
       where: { id: documentId },
       data: { title },
@@ -60,11 +72,7 @@ export class DocumentsService {
   }
 
   async remove(documentId: string, userId: string) {
-    const doc = await this.assertAccess(documentId, userId);
-    const member = await this.workspaces.assertMember(doc.workspaceId, userId);
-    if (member.role === 'viewer') {
-      throw new ForbiddenException('只读成员无法删除文档');
-    }
+    await this.assertCanEdit(documentId, userId);
     return this.prisma.document.delete({ where: { id: documentId } });
   }
 
